@@ -2,17 +2,26 @@
 <html lang="en">
   <head>
     <script>
-      // Immediate patch to guarantee window.fetch has a setter and suppress read-only getter assignment errors
+      // Immediate protection against third-party wallet extension collisions and fetch getter issues
       (function () {
-        // 1. Intercept uncaught fetch getter errors if any external tool attempts direct assignment
+        var isTargetError = function (str) {
+          if (!str || typeof str !== 'string') return false;
+          return (
+            str.indexOf('ethereum') !== -1 ||
+            str.indexOf('Cannot redefine property') !== -1 ||
+            (str.indexOf('fetch') !== -1 && str.indexOf('getter') !== -1) ||
+            str.indexOf('[vite] failed to connect to websocket') !== -1
+          );
+        };
+
+        // 1. Intercept uncaught errors (such as external wallet extensions redefining window.ethereum)
         var prevOnError = window.onerror;
         window.onerror = function (msg, source, lineno, colno, error) {
           if (
-            typeof msg === 'string' &&
-            msg.indexOf('fetch') !== -1 &&
-            msg.indexOf('getter') !== -1
+            isTargetError(typeof msg === 'string' ? msg : '') ||
+            (error && isTargetError(error.message))
           ) {
-            return true;
+            return true; // suppress error
           }
           if (prevOnError) {
             return prevOnError.apply(this, arguments);
@@ -24,9 +33,8 @@
           function (e) {
             if (
               e &&
-              e.message &&
-              e.message.indexOf('fetch') !== -1 &&
-              e.message.indexOf('getter') !== -1
+              (isTargetError(e.message) ||
+                (e.error && isTargetError(e.error.message)))
             ) {
               e.preventDefault();
               e.stopImmediatePropagation();
@@ -36,7 +44,76 @@
           true
         );
 
-        // 2. Patch prototype chain and window instance
+        window.addEventListener(
+          'unhandledrejection',
+          function (e) {
+            if (
+              e &&
+              e.reason &&
+              (isTargetError(e.reason.message) || isTargetError(String(e.reason)))
+            ) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+
+        // 2. Filter benign console noise from wallet extensions or Vite websocket disconnects
+        try {
+          var origConsoleError = console.error;
+          console.error = function () {
+            var firstArg = arguments[0];
+            var str = typeof firstArg === 'string' ? firstArg : (firstArg && firstArg.message ? firstArg.message : '');
+            if (isTargetError(str)) {
+              return;
+            }
+            origConsoleError.apply(console, arguments);
+          };
+        } catch (_) {}
+
+        // 3. Prevent "Cannot redefine property: ethereum" thrown by conflicting Web3 wallet extensions
+        try {
+          var origDefineProperty = Object.defineProperty;
+          Object.defineProperty = function (obj, prop, descriptor) {
+            if (obj === window && prop === 'ethereum') {
+              try {
+                var existing = Object.getOwnPropertyDescriptor(window, 'ethereum');
+                if (existing && !existing.configurable) {
+                  return obj;
+                }
+              } catch (_) {}
+            }
+            try {
+              return origDefineProperty.call(Object, obj, prop, descriptor);
+            } catch (err) {
+              if (
+                prop === 'ethereum' ||
+                (err && isTargetError(err.message))
+              ) {
+                return obj;
+              }
+              throw err;
+            }
+          };
+
+          var _eth;
+          var ethDesc = Object.getOwnPropertyDescriptor(window, 'ethereum');
+          if (!ethDesc || ethDesc.configurable) {
+            Object.defineProperty(window, 'ethereum', {
+              get: function () {
+                return _eth;
+              },
+              set: function (val) {
+                _eth = val;
+              },
+              configurable: true,
+              enumerable: true,
+            });
+          }
+        } catch (_) {}
+
+        // 4. Patch window.fetch prototype chain and window instance
         try {
           var win = typeof window !== 'undefined' ? window : globalThis;
           if (!win) return;

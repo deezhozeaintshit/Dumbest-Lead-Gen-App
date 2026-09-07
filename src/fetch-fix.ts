@@ -1,9 +1,54 @@
-// Universal fix to ensure window.fetch has a setter across window and its prototype chain
+// Universal fix to ensure window.fetch has a setter and suppress third-party extension property collisions
 (function () {
   try {
-    const win = typeof window !== 'undefined' ? window : globalThis;
+    const win: any = typeof window !== 'undefined' ? window : globalThis;
     if (!win) return;
 
+    // 1. Guard against third-party wallet extension "Cannot redefine property: ethereum"
+    try {
+      const origDefineProperty = Object.defineProperty;
+      Object.defineProperty = function (obj: any, prop: PropertyKey, descriptor: PropertyDescriptor & ThisType<any>) {
+        if (obj === win && prop === 'ethereum') {
+          try {
+            const existing = Object.getOwnPropertyDescriptor(win, 'ethereum');
+            if (existing && !existing.configurable) {
+              return obj;
+            }
+          } catch (_) {}
+        }
+        try {
+          return origDefineProperty.call(Object, obj, prop, descriptor);
+        } catch (err: any) {
+          if (
+            prop === 'ethereum' ||
+            (err && typeof err.message === 'string' && (
+              err.message.includes('Cannot redefine property: ethereum') ||
+              err.message.includes('ethereum')
+            ))
+          ) {
+            return obj;
+          }
+          throw err;
+        }
+      };
+
+      let _eth: any;
+      const ethDesc = Object.getOwnPropertyDescriptor(win, 'ethereum');
+      if (!ethDesc || ethDesc.configurable) {
+        Object.defineProperty(win, 'ethereum', {
+          get() {
+            return _eth;
+          },
+          set(val) {
+            _eth = val;
+          },
+          configurable: true,
+          enumerable: true,
+        });
+      }
+    } catch (_) {}
+
+    // 2. Fix window.fetch setter accessors
     let currentFetch = win.fetch;
 
     function defineAccessor(target: any) {
