@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { Lead, EmailStatus } from '../types.js';
 import { ScoreBreakdownModal } from './ScoreBreakdownModal.js';
+import { BUSINESS_TAXONOMY } from '../data/businessTaxonomy.js';
 
 interface LeadTableProps {
   leads: Lead[];
@@ -269,15 +270,26 @@ export const LeadTable: React.FC<LeadTableProps> = ({
           <select
             value={selectedIndustry}
             onChange={(e) => onIndustryChange(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-md px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-blue-500 max-w-[130px] truncate"
+            className="bg-slate-950 border border-slate-700 rounded-md px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-blue-500 max-w-[170px] truncate"
             id="filter-industry"
           >
             <option value="">All Industries</option>
-            {availableIndustries.map((ind) => (
-              <option key={ind} value={ind}>
-                {ind}
-              </option>
-            ))}
+            {availableIndustries.length > 0 && (
+              <optgroup label="Database Industries">
+                {availableIndustries.map((ind) => (
+                  <option key={ind} value={ind}>
+                    {ind}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="44 B2B Categories">
+              {BUSINESS_TAXONOMY.map((cat) => (
+                <option key={cat.id} value={cat.name}>
+                  {cat.name}
+                </option>
+              ))}
+            </optgroup>
           </select>
 
           {/* State Filter */}

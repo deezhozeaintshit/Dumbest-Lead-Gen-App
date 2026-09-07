@@ -3,22 +3,17 @@ import { LeadBatchResult, LeadProvider, LeadQueryParams, RawLeadData } from '../
 
 export class GooglePlacesProvider implements LeadProvider {
   readonly id = 'google_places';
-  readonly name = 'Google Places (Local Business)';
-  readonly description = 'Fetches local business leads via Google Places API with verified phone numbers, addresses, and websites.';
-
-  private apiKey: string | undefined;
-
-  constructor() {
-    this.apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  }
+  readonly name = 'Google Places API (Local Business)';
+  readonly description =
+    'Queries Google Places API (New) for verified local businesses, phone numbers, addresses, and official websites.';
 
   async search(query: LeadQueryParams): Promise<LeadBatchResult> {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
 
-    // If no API key configured, use intelligent mock fallback for testing
-    if (!apiKey) {
-      console.info('[GooglePlacesProvider] No GOOGLE_PLACES_API_KEY configured. Returning simulated Google Places data.');
-      return this.fallbackSimulatedSearch(query);
+    if (!apiKey || !apiKey.trim()) {
+      throw new Error(
+        'Google Places API is optional and currently deferred pending bank verification. The application is fully operational with live SEC EDGAR and OpenStreetMap Commercial Directory feeds.'
+      );
     }
 
     const searchTerm = [query.query, query.industry, query.city, query.state].filter(Boolean).join(' ');
@@ -35,7 +30,7 @@ export class GooglePlacesProvider implements LeadProvider {
         {
           headers: {
             'Content-Type': 'application/json',
-            'X-Goog-Api-Key': apiKey,
+            'X-Goog-Api-Key': apiKey.trim(),
             'X-Goog-FieldMask':
               'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.addressComponents,places.primaryTypeDisplayName,nextPageToken',
           },
@@ -81,6 +76,7 @@ export class GooglePlacesProvider implements LeadProvider {
           domain,
           website,
           phone: place.nationalPhoneNumber,
+          email: domain ? `info@${domain}` : undefined,
           industry: place.primaryTypeDisplayName?.text || query.industry || 'Local Business',
           street: street || place.formattedAddress?.split(',')[0],
           city: city || 'Austin',
@@ -98,93 +94,83 @@ export class GooglePlacesProvider implements LeadProvider {
         nextCursor: nextPageToken,
         hasMore: Boolean(nextPageToken),
       };
-    } catch (error: any) {
-      console.error('[GooglePlacesProvider] API request failed:', error.response?.data || error.message);
-      // Fallback gracefully so pipeline does not crash if key is invalid
-      return this.fallbackSimulatedSearch(query);
+    } catch (err: any) {
+      const msg = err.response?.data?.error?.message || err.message;
+      console.error('[GooglePlacesProvider] Live API query failed:', msg);
+      throw new Error(`Google Places API error: ${msg}`);
     }
   }
 
   async enrich(lead: Partial<RawLeadData>): Promise<RawLeadData> {
-    // If places API Place Details is needed or place has no website, attempt domain resolution
-    const domain = lead.domain || (lead.website ? new URL(lead.website).hostname.replace(/^www\./, '') : `${(lead.businessName || 'biz').toLowerCase().replace(/[^a-z0-9]/g, '')}.com`);
-    
-    return {
-      businessName: lead.businessName || 'Local Business',
-      legalName: lead.legalName || lead.businessName,
-      domain,
-      website: lead.website || `https://${domain}`,
-      phone: lead.phone || '555-012-3456',
-      email: lead.email || `info@${domain}`,
-      industry: lead.industry || 'Local Services',
-      employeeCount: lead.employeeCount || 15,
-      revenueRange: lead.revenueRange || '$500K - $2M',
-      street: lead.street || '101 Main Street',
-      city: lead.city || 'Dallas',
-      state: lead.state || 'TX',
-      zip: lead.zip || '75001',
-      country: lead.country || 'USA',
-      providerId: lead.providerId || `place-det-${Date.now()}`,
-      contacts: lead.contacts || [],
-    };
-  }
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
 
-  private fallbackSimulatedSearch(query: LeadQueryParams): LeadBatchResult {
-    const targetCity = query.city || 'Austin';
-    const targetState = query.state || 'TX';
-    const cat = query.industry || query.query || 'Commercial Services';
-
-    const localNames = [
-      'Metro Tech Solutions',
-      'Apex Medical Clinic',
-      'Lone Star Supply Depot',
-      'Pinnacle Law Group',
-      'Summit Financial Partners',
-      'Vanguard Dental Care',
-      'Bluebonnet Logistics Hub',
-      'Horizon Architecture Studio',
-      'Capital City Mechanical',
-      'Paramount Commercial Realty'
-    ];
-
-    const leads: RawLeadData[] = localNames.slice(0, query.limit || 8).map((name, i) => {
-      const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const domain = `${slug}.com`;
-      const phone = `(512) 44${i}-${1000 + i * 23}`;
-
+    if (!apiKey) {
       return {
-        businessName: name,
-        legalName: `${name}, P.C.`,
-        domain,
-        website: `https://www.${domain}`,
-        phone,
-        email: `office@${domain}`,
-        industry: cat,
-        employeeCount: 12 + i * 5,
-        revenueRange: '$1M - $5M',
-        street: `${300 + i * 25} Congress Ave`,
-        city: targetCity,
-        state: targetState,
-        zip: query.zip || '78701',
-        country: 'USA',
-        providerId: `gplace-mock-${i + 1}`,
-        contacts: [
-          {
-            firstName: 'Managing',
-            lastName: 'Partner',
-            title: 'General Manager',
-            email: `manager@${domain}`,
-            phone,
-          }
-        ],
+        businessName: lead.businessName || 'Business Lead',
+        legalName: lead.legalName || lead.businessName,
+        domain: lead.domain,
+        website: lead.website,
+        phone: lead.phone,
+        email: lead.email,
+        industry: lead.industry || 'Local Business',
+        street: lead.street,
+        city: lead.city,
+        state: lead.state,
+        zip: lead.zip,
+        country: lead.country || 'USA',
+        providerId: lead.providerId || `place-enriched-${Date.now()}`,
+        contacts: lead.contacts || [],
       };
-    });
+    }
+
+    if (lead.providerId && lead.providerId.startsWith('places/')) {
+      try {
+        const placeId = lead.providerId.replace(/^places\//, '');
+        const detailRes = await axios.get(`https://places.googleapis.com/v1/places/${placeId}`, {
+          headers: {
+            'X-Goog-Api-Key': apiKey,
+            'X-Goog-FieldMask': 'id,displayName,nationalPhoneNumber,websiteUri,formattedAddress',
+          },
+          timeout: 8000,
+        });
+
+        const p = detailRes.data;
+        return {
+          businessName: p.displayName?.text || lead.businessName || 'Business',
+          legalName: lead.legalName || p.displayName?.text,
+          domain: lead.domain,
+          website: p.websiteUri || lead.website,
+          phone: p.nationalPhoneNumber || lead.phone,
+          email: lead.email,
+          industry: lead.industry || 'Local Business',
+          street: lead.street || p.formattedAddress?.split(',')[0],
+          city: lead.city,
+          state: lead.state,
+          zip: lead.zip,
+          country: lead.country || 'USA',
+          providerId: lead.providerId,
+          contacts: lead.contacts || [],
+        };
+      } catch (err: any) {
+        console.warn('[GooglePlacesProvider] Place detail enrichment failed:', err.message);
+      }
+    }
 
     return {
-      leads,
-      totalFound: 30,
-      nextCursor: 'page-2',
-      hasMore: false,
+      businessName: lead.businessName || 'Business',
+      legalName: lead.legalName || lead.businessName,
+      domain: lead.domain,
+      website: lead.website,
+      phone: lead.phone,
+      email: lead.email,
+      industry: lead.industry,
+      street: lead.street,
+      city: lead.city,
+      state: lead.state,
+      zip: lead.zip,
+      country: lead.country || 'USA',
+      providerId: lead.providerId,
+      contacts: lead.contacts || [],
     };
   }
 }

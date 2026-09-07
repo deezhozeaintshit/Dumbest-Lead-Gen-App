@@ -1,25 +1,34 @@
 import axios from 'axios';
-import { LeadBatchResult, LeadProvider, LeadQueryParams, RawLeadData } from '../types.js';
+import { LeadBatchResult, LeadProvider, LeadQueryParams, RawContactPerson, RawLeadData } from '../types.js';
 
 export class B2BContactProvider implements LeadProvider {
   readonly id = 'b2b_contacts';
-  readonly name = 'Apollo & B2B Contact Engine';
-  readonly description = 'Searches B2B organizations and extracts executive decision-makers with emails, titles, and LinkedIn profiles.';
+  readonly name = 'Apollo & Hunter B2B Contact Engine';
+  readonly description =
+    'Connects to Apollo.io and Hunter.io APIs for real B2B organization intelligence, verified executive contacts, and corporate email discovery.';
 
   async search(query: LeadQueryParams): Promise<LeadBatchResult> {
     const apolloKey = process.env.APOLLO_API_KEY;
+    const hunterKey = process.env.HUNTER_API_KEY;
 
+    if (!apolloKey && !hunterKey) {
+      throw new Error(
+        'APOLLO_API_KEY or HUNTER_API_KEY environment variable is required to execute B2B contact searches. Please configure your API key in environment variables.'
+      );
+    }
+
+    const page = query.page || 1;
+    const perPage = Math.min(query.limit || 10, 25);
+
+    // If Apollo key is available, execute live Apollo Organization Search
     if (apolloKey) {
       try {
-        const page = query.page || 1;
-        const perPage = Math.min(query.limit || 10, 25);
-
-        // Apollo Organization Search
         const response = await axios.post(
           'https://api.apollo.io/v1/organizations/search',
           {
             q_organization_keyword_tags: query.industry ? [query.industry] : undefined,
-            organization_locations: query.city || query.state ? [`${query.city || ''}, ${query.state || ''}`.trim()] : undefined,
+            organization_locations:
+              query.city || query.state ? [`${query.city || ''}, ${query.state || ''}`.trim()] : undefined,
             page,
             per_page: perPage,
           },
@@ -27,9 +36,9 @@ export class B2BContactProvider implements LeadProvider {
             headers: {
               'Content-Type': 'application/json',
               'Cache-Control': 'no-cache',
-              'X-Api-Key': apolloKey,
+              'X-Api-Key': apolloKey.trim(),
             },
-            timeout: 10000,
+            timeout: 12000,
           }
         );
 
@@ -42,15 +51,16 @@ export class B2BContactProvider implements LeadProvider {
           domain: org.primary_domain,
           website: org.website_url,
           phone: org.phone,
+          email: org.primary_domain ? `contact@${org.primary_domain}` : undefined,
           industry: org.industry || query.industry || 'B2B Software & Services',
           employeeCount: org.estimated_num_employees || 50,
           revenueRange: org.annual_revenue_printed || '$5M - $20M',
           street: org.street_address,
-          city: org.city || query.city || 'Austin',
-          state: org.state || query.state || 'TX',
+          city: org.city || query.city,
+          state: org.state || query.state,
           zip: org.postal_code,
           country: org.country || 'USA',
-          providerId: org.id,
+          providerId: org.id ? `apollo-${org.id}` : undefined,
           contacts: [],
         }));
 
@@ -61,105 +71,156 @@ export class B2BContactProvider implements LeadProvider {
           hasMore: page * perPage < total,
         };
       } catch (err: any) {
-        console.warn('[B2BContactProvider] Live Apollo API failed or rate-limited. Serving fallback:', err.message);
+        const msg = err.response?.data?.message || err.message;
+        console.error('[B2BContactProvider] Live Apollo API query failed:', msg);
+        throw new Error(`Apollo API error: ${msg}`);
       }
     }
 
-    // Realistic fallback generation matching Apollo/Hunter payload
-    return this.fallbackSearch(query);
+    // If Hunter key is available, query Hunter Domain Search
+    if (hunterKey) {
+      try {
+        const domainQuery = query.query || (query.industry ? `${query.industry.toLowerCase().replace(/[^a-z]/g, '')}.com` : 'stripe.com');
+        const response = await axios.get('https://api.hunter.io/v2/domain-search', {
+          params: {
+            domain: domainQuery,
+            api_key: hunterKey.trim(),
+            limit: perPage,
+          },
+          timeout: 10000,
+        });
+
+        const data = response.data?.data || {};
+        const emails = data.emails || [];
+
+        const contacts: RawContactPerson[] = emails.map((em: any) => ({
+          firstName: em.first_name || 'Executive',
+          lastName: em.last_name || 'Contact',
+          title: em.position || 'Team Member',
+          email: em.value,
+          phone: em.phone_number,
+          linkedinUrl: em.linkedin,
+        }));
+
+        const domain = data.domain || domainQuery;
+
+        const lead: RawLeadData = {
+          businessName: data.organization || data.domain || 'B2B Client',
+          legalName: data.organization,
+          domain,
+          website: `https://${domain}`,
+          industry: query.industry || 'Enterprise Technology',
+          country: data.country || 'USA',
+          providerId: `hunter-${domain}`,
+          contacts,
+        };
+
+        return {
+          leads: [lead],
+          totalFound: 1,
+          hasMore: false,
+        };
+      } catch (err: any) {
+        const msg = err.response?.data?.errors?.[0]?.details || err.message;
+        console.error('[B2BContactProvider] Live Hunter API query failed:', msg);
+        throw new Error(`Hunter API error: ${msg}`);
+      }
+    }
+
+    throw new Error('No supported B2B contact API key configured.');
   }
 
   async enrich(lead: Partial<RawLeadData>): Promise<RawLeadData> {
-    const domain = lead.domain || (lead.website ? new URL(lead.website).hostname.replace(/^www\./, '') : 'cloudscale.io');
-    const existing = lead.contacts || [];
+    const domain = lead.domain || (lead.website ? new URL(lead.website).hostname.replace(/^www\./, '') : undefined);
+    const existing = lead.contacts ? [...lead.contacts] : [];
 
-    const newContact = {
-      firstName: 'Samantha',
-      lastName: 'Holloway',
-      title: 'VP of Global Sales & Partnerships',
-      email: `samantha.holloway@${domain}`,
-      phone: lead.phone || '+1 (415) 880-9211',
-      linkedinUrl: `https://www.linkedin.com/in/samantha-holloway-sales-vp`,
-    };
+    const apolloKey = process.env.APOLLO_API_KEY;
+    const hunterKey = process.env.HUNTER_API_KEY;
+
+    // 1. Live Hunter.io Contact Discovery if key exists
+    if (domain && hunterKey) {
+      try {
+        const res = await axios.get('https://api.hunter.io/v2/domain-search', {
+          params: {
+            domain,
+            api_key: hunterKey.trim(),
+            limit: 5,
+          },
+          timeout: 8000,
+        });
+
+        const emails = res.data?.data?.emails || [];
+        for (const em of emails) {
+          if (em.value && !existing.some((c) => c.email === em.value)) {
+            existing.push({
+              firstName: em.first_name || 'Executive',
+              lastName: em.last_name || 'Contact',
+              title: em.position || 'Department Lead',
+              email: em.value,
+              phone: em.phone_number,
+              linkedinUrl: em.linkedin,
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[B2BContactProvider] Hunter live contact enrichment failed:', err.message);
+      }
+    }
+
+    // 2. Live Apollo People Search if key exists
+    if (domain && apolloKey && existing.length === 0) {
+      try {
+        const res = await axios.post(
+          'https://api.apollo.io/v1/mixed_people/search',
+          {
+            q_organization_domains: domain,
+            page: 1,
+            per_page: 5,
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Api-Key': apolloKey.trim(),
+            },
+            timeout: 8000,
+          }
+        );
+
+        const people = res.data?.people || [];
+        for (const p of people) {
+          if (p.first_name) {
+            existing.push({
+              firstName: p.first_name,
+              lastName: p.last_name || '',
+              title: p.title || 'Decision Maker',
+              email: p.email || (domain ? `${p.first_name.toLowerCase()}.${(p.last_name || 'contact').toLowerCase()}@${domain}` : undefined),
+              phone: p.sanitized_phone,
+              linkedinUrl: p.linkedin_url,
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn('[B2BContactProvider] Apollo live people search failed:', err.message);
+      }
+    }
 
     return {
-      businessName: lead.businessName || 'High-Growth Tech Enterprise',
-      legalName: lead.legalName || `${lead.businessName || 'High-Growth Tech'} Inc.`,
+      businessName: lead.businessName || 'B2B Enterprise',
+      legalName: lead.legalName || lead.businessName,
       domain,
-      website: lead.website || `https://${domain}`,
-      phone: lead.phone || '+1 (415) 880-9000',
-      email: lead.email || `contact@${domain}`,
-      industry: lead.industry || 'SaaS & Enterprise Cloud',
-      employeeCount: lead.employeeCount || 120,
-      revenueRange: lead.revenueRange || '$20M - $50M',
-      street: lead.street || '500 Howard Street, Suite 400',
-      city: lead.city || 'San Francisco',
-      state: lead.state || 'CA',
-      zip: lead.zip || '94105',
+      website: lead.website || (domain ? `https://${domain}` : undefined),
+      phone: lead.phone,
+      email: lead.email || (domain ? `contact@${domain}` : undefined),
+      industry: lead.industry || 'B2B Enterprise',
+      employeeCount: lead.employeeCount,
+      revenueRange: lead.revenueRange,
+      street: lead.street,
+      city: lead.city,
+      state: lead.state,
+      zip: lead.zip,
       country: lead.country || 'USA',
-      providerId: lead.providerId || `b2b-contact-${Date.now()}`,
-      contacts: [...existing, newContact],
-    };
-  }
-
-  private fallbackSearch(query: LeadQueryParams): LeadBatchResult {
-    const limit = query.limit || 10;
-    const page = query.page || 1;
-    const ind = query.industry || 'Fintech & Capital Markets';
-    const city = query.city || 'New York';
-    const state = query.state || 'NY';
-
-    const companies = [
-      { name: 'Axiom Wealth Management', domain: 'axiomwealth.com', emp: 320, rev: '$45M - $100M', ceo: { first: 'Arthur', last: 'Pendleton', title: 'Managing Director & CEO' } },
-      { name: 'Klarity AI Compliance', domain: 'klaritysystems.io', emp: 85, rev: '$12M - $25M', ceo: { first: 'Leila', last: 'Mirza', title: 'Founder & Chief Product Officer' } },
-      { name: 'Helios Carbon Analytics', domain: 'helioscarbon.com', emp: 60, rev: '$8M - $18M', ceo: { first: 'Torsten', last: 'Lind', title: 'VP Engineering' } },
-      { name: 'Silverline Health Intelligence', domain: 'silverlinehealth.org', emp: 410, rev: '$75M - $150M', ceo: { first: 'Evelyn', last: 'Ross', title: 'Chief Medical Information Officer' } },
-      { name: 'Coronet Aerospace Defense', domain: 'coronetaero.com', emp: 950, rev: '$120M+', ceo: { first: 'Grant', last: 'Sterling', title: 'Chief Executive Officer' } },
-      { name: 'Veloce Logistics Systems', domain: 'velocesupply.com', emp: 180, rev: '$30M - $60M', ceo: { first: 'Mateo', last: 'Silva', title: 'VP Supply Chain Strategy' } },
-      { name: 'TrueNorth Cybersecurity', domain: 'truenorthsec.io', emp: 240, rev: '$40M - $80M', ceo: { first: 'Claire', last: 'Dupont', title: 'Head of Threat Operations' } },
-      { name: 'Altas Precision Robotics', domain: 'atlasrobotics.co', emp: 115, rev: '$15M - $35M', ceo: { first: 'Hiroshi', last: 'Tanaka', title: 'VP Automation' } },
-      { name: 'Bridgeport Capital Partners', domain: 'bridgeportcap.com', emp: 75, rev: '$25M - $60M', ceo: { first: 'Charles', last: 'Bingham', title: 'Senior Partner' } },
-      { name: 'Quantix Signal Processing', domain: 'quantixsignal.io', emp: 140, rev: '$22M - $45M', ceo: { first: 'Nadia', last: 'Youssef', title: 'CTO & Co-Founder' } },
-    ];
-
-    const startIndex = (page - 1) * limit;
-    const slice = companies.slice(startIndex, startIndex + limit);
-
-    const leads: RawLeadData[] = slice.map((c, i) => ({
-      businessName: c.name,
-      legalName: `${c.name}, Inc.`,
-      domain: c.domain,
-      website: `https://${c.domain}`,
-      phone: `(212) 555-0${100 + i}`,
-      email: `press@${c.domain}`,
-      industry: ind,
-      employeeCount: c.emp,
-      revenueRange: c.rev,
-      street: `${400 + i * 20} Madison Ave`,
-      city,
-      state,
-      zip: query.zip || '10017',
-      country: 'USA',
-      providerId: `apollo-mock-${startIndex + i + 1}`,
-      contacts: [
-        {
-          firstName: c.ceo.first,
-          lastName: c.ceo.last,
-          title: c.ceo.title,
-          email: `${c.ceo.first.toLowerCase()}.${c.ceo.last.toLowerCase()}@${c.domain}`,
-          phone: `(212) 555-0${100 + i}`,
-          linkedinUrl: `https://www.linkedin.com/in/${c.ceo.first.toLowerCase()}-${c.ceo.last.toLowerCase()}-exec`,
-        },
-      ],
-    }));
-
-    const hasMore = startIndex + slice.length < companies.length;
-
-    return {
-      leads,
-      totalFound: companies.length,
-      nextCursor: hasMore ? String(page + 1) : undefined,
-      hasMore,
+      providerId: lead.providerId,
+      contacts: existing,
     };
   }
 }

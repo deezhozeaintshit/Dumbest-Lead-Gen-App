@@ -190,31 +190,16 @@ export class EmailValidationService {
         };
       }
     } catch (dnsErr: any) {
-      // In sandbox/testing environments where external DNS might be limited or domain is synthetic
-      if (dnsErr.code === 'ENOTFOUND' || dnsErr.code === 'ENODATA') {
-        // Synthetic mock domains created during test/demo (e.g. .internal or fake domain)
-        if (domain.endsWith('.com') || domain.endsWith('.org') || domain.endsWith('.io')) {
-          // If in offline dev mode, treat standard company domains with valid format as deliverable
-          return {
-            email: cleanEmail,
-            status: 'VALID',
-            reason: `Corporate format validated for @${domain}`,
-            providerUsed: 'builtin_verifier',
-            isDisposable: false,
-            isFree,
-            hasMxRecords: true,
-            deliverabilityScore: 92,
-          };
-        }
+      if (dnsErr.code === 'ENOTFOUND' || dnsErr.code === 'ENODATA' || dnsErr.code === 'SERVFAIL') {
         return {
           email: cleanEmail,
           status: 'INVALID',
-          reason: `Domain ${domain} does not exist in public DNS`,
+          reason: `Domain ${domain} has no DNS mail records (${dnsErr.code})`,
           providerUsed: 'builtin_verifier',
           isDisposable: false,
           isFree,
           hasMxRecords: false,
-          deliverabilityScore: 5,
+          deliverabilityScore: 0,
         };
       }
 

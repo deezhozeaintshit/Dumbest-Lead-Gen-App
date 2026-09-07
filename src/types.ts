@@ -77,7 +77,11 @@ export interface ProviderInfo {
   name: string;
   description: string;
   isMock: boolean;
+  requiresKey?: boolean;
+  keyEnvVar?: string;
   hasKey: boolean;
+  isDeferred?: boolean;
+  statusNote?: string;
 }
 
 export interface User {

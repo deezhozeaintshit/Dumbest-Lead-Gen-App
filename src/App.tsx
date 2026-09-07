@@ -10,7 +10,16 @@ import { LeadTable } from './components/LeadTable.js';
 import { LeadDetailModal } from './components/LeadDetailModal.js';
 import { PWAMobileBanner } from './components/PWAMobileBanner.js';
 import { OfflineIndicator } from './components/OfflineIndicator.js';
+import { ApiAdaptersModal } from './components/ApiAdaptersModal.js';
+import { SettingsModal } from './components/SettingsModal.js';
+import { CsvImportModal } from './components/CsvImportModal.js';
+import { ScrapingStatusBanner } from './components/ScrapingStatusBanner.js';
+import { JobsView } from './components/JobsView.js';
+import { AdaptersView } from './components/AdaptersView.js';
+import { SettingsView } from './components/SettingsView.js';
+import { NichesView } from './components/NichesView.js';
 import { IngestionJob, Lead, PipelineStats, ProviderInfo } from './types.js';
+import { ArrowRight, Search, Zap, Layers, Settings, Database, Sparkles, Filter, Compass } from 'lucide-react';
 
 function DashboardContent() {
   const { user, isLoading: authLoading } = useAuth();
@@ -25,8 +34,23 @@ function DashboardContent() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
 
   // Navigation tab state
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings' | 'niches'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+
+  // Modals state
+  const [isAdaptersModalOpen, setIsAdaptersModalOpen] = useState<boolean>(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
+  const [isCsvModalOpen, setIsCsvModalOpen] = useState<boolean>(false);
+
+  // Scraping Completion Tracking
+  const prevRunningIdsRef = React.useRef<Set<string>>(new Set());
+  const [completedJobAlert, setCompletedJobAlert] = useState<{
+    id: string;
+    provider: string;
+    imported: number;
+    totalFound: number;
+    timestamp: Date;
+  } | null>(null);
 
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -113,7 +137,7 @@ function DashboardContent() {
 
   const refreshAll = async () => {
     setIsRefreshing(true);
-    await Promise.all([fetchStats(), fetchJobs(), fetchLeads()]);
+    await Promise.all([fetchStats(), fetchJobs(), fetchLeads(), fetchProviders()]);
     setIsRefreshing(false);
   };
 
@@ -161,10 +185,54 @@ function DashboardContent() {
       fetchJobs();
       fetchStats();
       fetchLeads(currentPage);
-    }, 2500);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [jobs, currentPage, user, fetchJobs, fetchStats, fetchLeads]);
+
+  // Detect when background jobs transition to COMPLETED or FAILED
+  useEffect(() => {
+    const currentRunningIds = new Set(
+      jobs.filter((j) => j.status === 'RUNNING' || j.status === 'PENDING').map((j) => j.id)
+    );
+
+    for (const prevId of prevRunningIdsRef.current) {
+      if (!currentRunningIds.has(prevId)) {
+        const finishedJob = jobs.find((j) => j.id === prevId);
+        if (finishedJob) {
+          if (finishedJob.status === 'COMPLETED') {
+            setCompletedJobAlert({
+              id: finishedJob.id,
+              provider: finishedJob.provider,
+              imported: finishedJob.total_imported,
+              totalFound: finishedJob.total_found,
+              timestamp: new Date(),
+            });
+            showToast(
+              `Scraping Complete! Ingested ${finishedJob.total_imported} leads from ${finishedJob.provider.replace(/_/g, ' ').toUpperCase()}`,
+              'success'
+            );
+            fetchStats();
+            fetchLeads(1);
+          } else if (finishedJob.status === 'FAILED') {
+            showToast(`Ingestion failed: ${finishedJob.error_message || 'Job error'}`, 'error');
+          }
+        }
+      }
+    }
+
+    prevRunningIdsRef.current = currentRunningIds;
+  }, [jobs, fetchStats, fetchLeads]);
+
+  // Handle Sidebar Tab Click - Renders actual finished full pages
+  const handleSelectTab = (tab: 'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings') => {
+    setActiveTab(tab);
+  };
+
+  const handleViewLeadsByProvider = (providerId: string) => {
+    setSelectedProvider(providerId);
+    setActiveTab('explorer');
+  };
 
   // Start Ingestion Job
   const handleStartIngest = async (params: {
@@ -199,6 +267,28 @@ function DashboardContent() {
     } finally {
       setIsIngesting(false);
     }
+  };
+
+  // Launch direct niche ingestion from Niches Directory
+  const handleSelectNicheForIngest = async (subNiche: string, categoryId: string) => {
+    setActiveTab('jobs');
+    await handleStartIngest({
+      providerId: 'sec_edgar',
+      industry: subNiche,
+      city: 'Austin',
+      state: 'TX',
+      zip: '78701',
+      targetCount: 10,
+      autoEnrich: true,
+    });
+    showToast(`Scraping job started for vertical: ${subNiche}`);
+  };
+
+  // Filter existing leads in Lead Explorer by chosen niche
+  const handleFilterLeadsByNiche = (nicheName: string) => {
+    setSearchTerm(nicheName);
+    setActiveTab('explorer');
+    showToast(`Filtering Lead Explorer for "${nicheName}"`);
   };
 
   // Enrich single lead
@@ -319,15 +409,15 @@ function DashboardContent() {
     }
   };
 
-  // Seed sample records
+  // Seed verified SEC records
   const handleSeedSample = async () => {
     setIsSeeding(true);
     try {
-      await axios.post('/api/seed');
-      showToast('Sample B2B leads seeded with scores & verified emails!');
+      const res = await axios.post('/api/seed');
+      showToast(res.data.message || 'Verified enterprise B2B leads ingested from SEC EDGAR!');
       await refreshAll();
-    } catch (err) {
-      showToast('Failed to seed sample leads', 'error');
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to ingest enterprise leads', 'error');
     } finally {
       setIsSeeding(false);
     }
@@ -360,6 +450,7 @@ function DashboardContent() {
   }
 
   const activeJobsCount = jobs.filter((j) => j.status === 'RUNNING' || j.status === 'PENDING').length;
+  const activeJob = jobs.find((j) => j.status === 'RUNNING' || j.status === 'PENDING') || null;
 
   return (
     <div className="h-screen w-full bg-[#09090B] text-slate-200 font-sans flex antialiased select-none overflow-hidden">
@@ -381,7 +472,7 @@ function DashboardContent() {
       {/* Navigation Sidebar */}
       <Sidebar
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleSelectTab}
         isOpenMobile={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
         activeJobsCount={activeJobsCount}
@@ -404,20 +495,135 @@ function DashboardContent() {
           onToggleMobileMenu={() => setIsMobileMenuOpen(true)}
           onExportCsv={handleExportCsv}
           isExporting={isExporting}
+          activeTab={activeTab}
         />
 
-        {/* Dynamic Content Grid */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
-          {/* Main Work Area: 8 columns */}
-          <section className="lg:col-span-8 p-4 sm:p-6 overflow-y-auto flex flex-col min-h-0 space-y-6">
-            {/* KPI Metrics */}
-            <StatsBanner
-              stats={stats}
-              onExportCsv={handleExportCsv}
-              isExporting={isExporting}
-            />
+        {/* Live Scraping Progress & Completion Notification Banner */}
+        <ScrapingStatusBanner
+          activeJob={activeJob}
+          completedAlert={completedJobAlert}
+          onDismissAlert={() => setCompletedJobAlert(null)}
+          onViewLeads={() => {
+            setActiveTab('explorer');
+            setCompletedJobAlert(null);
+          }}
+        />
 
-            {/* Lead Directory Table */}
+        {/* Dynamic Content Views based on activeTab */}
+        {activeTab === 'dashboard' && (
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
+            {/* Main Work Area: 8 columns */}
+            <section className="lg:col-span-8 p-4 sm:p-6 overflow-y-auto flex flex-col min-h-0 space-y-6">
+              {/* KPI Metrics */}
+              <StatsBanner
+                stats={stats}
+                onExportCsv={handleExportCsv}
+                isExporting={isExporting}
+              />
+
+              {/* Lead Directory Table Preview with Quick Link to Full Explorer */}
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-white tracking-tight">
+                      Live Prospect Stream ({totalLeads} Total)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      High-intent B2B accounts scored across all live feeds.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('explorer')}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-sm"
+                    id="dash-go-to-explorer-btn"
+                  >
+                    <span>Open Full Lead Explorer</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <LeadTable
+                  leads={leads}
+                  totalLeads={totalLeads}
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={handlePageChange}
+                  searchTerm={searchTerm}
+                  onSearchChange={setSearchTerm}
+                  selectedState={selectedState}
+                  onStateChange={setSelectedState}
+                  selectedIndustry={selectedIndustry}
+                  onIndustryChange={setSelectedIndustry}
+                  selectedStatus={selectedStatus}
+                  onStatusChange={setSelectedStatus}
+                  selectedEmailStatus={selectedEmailStatus}
+                  onEmailStatusChange={setSelectedEmailStatus}
+                  selectedProvider={selectedProvider}
+                  onProviderChange={setSelectedProvider}
+                  sortBy={sortBy}
+                  sortOrder={sortOrder}
+                  onSortChange={handleSortChange}
+                  availableStates={stats?.availableStates || []}
+                  availableIndustries={stats?.availableIndustries || []}
+                  onSelectLead={(lead) => setSelectedLead(lead)}
+                  onEnrichLead={handleEnrichLead}
+                  onUpdateStatus={handleUpdateStatus}
+                  onDeleteLead={handleDeleteLead}
+                  onBulkUpdateStatus={handleBulkUpdateStatus}
+                  onBulkDelete={handleBulkDelete}
+                  enrichingId={enrichingId}
+                  onResetFilters={handleResetFilters}
+                />
+              </div>
+            </section>
+
+            {/* Right Aside: 4 columns - Ingestion Control Panel */}
+            <aside className="lg:col-span-4 border-t lg:border-t-0 lg:border-l border-slate-800 bg-[#0C0C0E] p-4 sm:p-6 space-y-6 overflow-y-auto min-h-0">
+              <IngestionControlPanel
+                providers={providers}
+                jobs={jobs}
+                onStartIngest={handleStartIngest}
+                isIngesting={isIngesting}
+                onOpenCsvModal={() => setIsCsvModalOpen(true)}
+                onOpenAdaptersModal={() => setActiveTab('adapters')}
+              />
+            </aside>
+          </div>
+        )}
+
+        {/* Full 12-Column Lead Explorer View */}
+        {activeTab === 'explorer' && (
+          <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto flex flex-col min-h-0 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center space-x-2">
+                  <Search className="w-5 h-5 text-blue-400" />
+                  <span>Lead Explorer &amp; Prospect Directory</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Full-screen view with multi-attribute filtering, DNS deliverability status, and batch exports.
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  onClick={() => setIsCsvModalOpen(true)}
+                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded text-xs font-semibold flex items-center space-x-1.5 transition-colors border border-slate-800"
+                  id="explorer-import-csv-btn"
+                >
+                  <span>Upload CSV</span>
+                </button>
+                <button
+                  onClick={handleExportCsv}
+                  disabled={isExporting || totalLeads === 0}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-sm disabled:opacity-50"
+                  id="explorer-export-csv-btn"
+                >
+                  <span>Export Scored CSV</span>
+                </button>
+              </div>
+            </div>
+
             <div className="flex-1 flex flex-col min-h-0">
               <LeadTable
                 leads={leads}
@@ -452,18 +658,42 @@ function DashboardContent() {
                 onResetFilters={handleResetFilters}
               />
             </div>
-          </section>
+          </div>
+        )}
 
-          {/* Right Aside: 4 columns - Ingestion Control Panel & Job Monitor */}
-          <aside className="lg:col-span-4 border-t lg:border-t-0 lg:border-l border-slate-800 bg-[#0C0C0E] p-4 sm:p-6 space-y-6 overflow-y-auto min-h-0">
-            <IngestionControlPanel
-              providers={providers}
-              jobs={jobs}
-              onStartIngest={handleStartIngest}
-              isIngesting={isIngesting}
-            />
-          </aside>
-        </div>
+        {/* Active Jobs & Ingestion Control Center View */}
+        {activeTab === 'jobs' && (
+          <JobsView
+            jobs={jobs}
+            providers={providers}
+            onStartIngest={handleStartIngest}
+            isIngesting={isIngesting}
+            onOpenAdaptersModal={() => setActiveTab('adapters')}
+            onOpenCsvModal={() => setIsCsvModalOpen(true)}
+            onViewLeadsByProvider={handleViewLeadsByProvider}
+          />
+        )}
+
+        {/* External API Adapters View */}
+        {activeTab === 'adapters' && (
+          <AdaptersView
+            providers={providers}
+            onOpenCsvModal={() => setIsCsvModalOpen(true)}
+          />
+        )}
+
+        {/* Settings & Scoring Rules View */}
+        {activeTab === 'settings' && (
+          <SettingsView providers={providers} />
+        )}
+
+        {/* 44 Categories & 440+ Niches Directory View */}
+        {activeTab === 'niches' && (
+          <NichesView
+            onSelectNicheForIngest={handleSelectNicheForIngest}
+            onFilterLeadsByNiche={handleFilterLeadsByNiche}
+          />
+        )}
       </main>
 
       {/* Lead Detail Slide-over Modal */}
@@ -477,6 +707,31 @@ function DashboardContent() {
           setLeads((prev) => prev.map((l) => (l.id === updatedLead.id ? updatedLead : l)));
         }}
         isEnriching={enrichingId === selectedLead?.id}
+      />
+
+      {/* External API Adapters & Live Feeds Modal */}
+      <ApiAdaptersModal
+        isOpen={isAdaptersModalOpen}
+        onClose={() => setIsAdaptersModalOpen(false)}
+        providers={providers}
+      />
+
+      {/* Settings & Rules Modal */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        providers={providers}
+      />
+
+      {/* CSV Dataset Import Modal */}
+      <CsvImportModal
+        isOpen={isCsvModalOpen}
+        onClose={() => setIsCsvModalOpen(false)}
+        onImportSuccess={(jobId, count) => {
+          showToast(`Ingesting ${count} records from dataset (Job: ${jobId.slice(0, 8)}...)`);
+          fetchJobs();
+          fetchStats();
+        }}
       />
     </div>
   );

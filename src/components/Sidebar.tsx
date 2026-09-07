@@ -9,12 +9,13 @@ import {
   X,
   LogOut,
   User as UserIcon,
+  Compass,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.js';
 
 interface SidebarProps {
-  activeTab: 'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings';
-  onSelectTab: (tab: 'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings') => void;
+  activeTab: 'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings' | 'niches';
+  onSelectTab: (tab: 'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings' | 'niches') => void;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
   activeJobsCount: number;
@@ -29,7 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { user, logout } = useAuth();
 
-  const handleNavClick = (tab: 'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings') => {
+  const handleNavClick = (tab: 'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings' | 'niches') => {
     onSelectTab(tab);
     onCloseMobile();
   };
@@ -133,6 +134,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {activeJobsCount}
                 </span>
               )}
+            </button>
+
+            <button
+              onClick={() => handleNavClick('niches')}
+              className={`w-full flex items-center justify-between px-2.5 py-2 text-xs font-medium rounded transition-colors ${
+                activeTab === 'niches'
+                  ? 'bg-slate-800/60 text-blue-400 border border-slate-700'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/20'
+              }`}
+              id="sidebar-nav-niches"
+            >
+              <div className="flex items-center gap-2.5">
+                <Compass className="w-4 h-4" />
+                <span>Niches Directory</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[10px] font-mono font-semibold border border-blue-500/20">
+                440+
+              </span>
             </button>
 
             <div className="pt-4 px-2 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">

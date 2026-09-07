@@ -12,6 +12,7 @@ interface HeaderProps {
   onToggleMobileMenu: () => void;
   onExportCsv?: () => void;
   isExporting?: boolean;
+  activeTab?: 'dashboard' | 'explorer' | 'jobs' | 'adapters' | 'settings' | 'niches';
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,7 +25,45 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
   onExportCsv,
   isExporting,
+  activeTab = 'dashboard',
 }) => {
+  const getTitles = () => {
+    switch (activeTab) {
+      case 'niches':
+        return {
+          title: 'Business Niches & Category Directory',
+          subtitle: '44 categories & 440+ verified B2B sub-niches for targeted scraping',
+        };
+      case 'explorer':
+        return {
+          title: 'Lead Explorer',
+          subtitle: 'Search, filter, inspect, and export enriched B2B prospects',
+        };
+      case 'jobs':
+        return {
+          title: 'Ingestion Pipeline & Background Jobs',
+          subtitle: 'Real-time scraping execution telemetry and background sync logs',
+        };
+      case 'adapters':
+        return {
+          title: 'External API Adapters',
+          subtitle: 'Live B2B registry feeds, ping diagnostics, and bank verification status',
+        };
+      case 'settings':
+        return {
+          title: 'Settings & Scoring Rules',
+          subtitle: 'Deduplication hierarchy, scoring weights, and SQLite vault',
+        };
+      default:
+        return {
+          title: 'Executive Command Dashboard',
+          subtitle: 'Real-time B2B Pipeline Analytics & Lead Ingestion',
+        };
+    }
+  };
+
+  const { title, subtitle } = getTitles();
+
   return (
     <header className="h-16 border-b border-slate-800 flex items-center justify-between px-4 sm:px-6 lg:px-8 bg-[#09090B] text-slate-200 sticky top-0 z-30">
       <div className="flex items-center gap-3">
@@ -37,9 +76,9 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         <div>
-          <h1 className="text-base sm:text-lg font-medium text-slate-100 tracking-tight">System Overview</h1>
+          <h1 className="text-base sm:text-lg font-medium text-slate-100 tracking-tight">{title}</h1>
           <p className="text-[11px] text-slate-500 hidden sm:block">
-            Modular B2B Lead Ingestion &amp; Enrichment Architecture
+            {subtitle}
           </p>
         </div>
       </div>

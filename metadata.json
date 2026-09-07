@@ -1,6 +1,6 @@
 {
   "name": "Dumbest Lead Gen App",
-  "description": "Production-ready, modular B2B lead ingestion pipeline with multi-provider adapters, deduplication, enrichment, and export dashboard.",
+  "description": "Production-ready B2B lead ingestion pipeline with 44 business categories, 440+ targeted sub-niches, multi-provider adapters, deduplication, enrichment, and export dashboard.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

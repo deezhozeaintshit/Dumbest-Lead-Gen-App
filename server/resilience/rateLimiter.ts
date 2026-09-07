@@ -82,9 +82,16 @@ export async function withExponentialBackoff<T>(
  * Provider-specific rate limiter instances
  */
 export const providerRateLimiters: Record<string, Bottleneck> = {
-  mock: new Bottleneck({
-    minTime: 60, // ~16 req/sec
-    maxConcurrent: 5,
+  sec_edgar: new Bottleneck({
+    minTime: 120, // SEC limit: max 10 req/sec with compliant User-Agent
+    maxConcurrent: 2,
+    reservoir: 10,
+    reservoirRefreshAmount: 10,
+    reservoirRefreshInterval: 1000,
+  }),
+  osm_commercial: new Bottleneck({
+    minTime: 1000, // Nominatim / Overpass policy: 1 req/sec
+    maxConcurrent: 1,
   }),
   google_places: new Bottleneck({
     minTime: 250, // 4 req/sec
@@ -93,12 +100,16 @@ export const providerRateLimiters: Record<string, Bottleneck> = {
     reservoirRefreshAmount: 50,
     reservoirRefreshInterval: 60 * 1000,
   }),
-  apollo: new Bottleneck({
+  b2b_contacts: new Bottleneck({
     minTime: 400, // 2.5 req/sec
     maxConcurrent: 2,
     reservoir: 30,
     reservoirRefreshAmount: 30,
     reservoirRefreshInterval: 60 * 1000,
+  }),
+  csv_import: new Bottleneck({
+    minTime: 20,
+    maxConcurrent: 5,
   }),
   default: new Bottleneck({
     minTime: 300,
