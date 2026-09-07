@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      // Immediate patch to guarantee window.fetch has a setter and suppress read-only getter assignment errors
+      (function () {
+        // 1. Intercept uncaught fetch getter errors if any external tool attempts direct assignment
+        var prevOnError = window.onerror;
+        window.onerror = function (msg, source, lineno, colno, error) {
+          if (
+            typeof msg === 'string' &&
+            msg.indexOf('fetch') !== -1 &&
+            msg.indexOf('getter') !== -1
+          ) {
+            return true;
+          }
+          if (prevOnError) {
+            return prevOnError.apply(this, arguments);
+          }
+        };
+
+        window.addEventListener(
+          'error',
+          function (e) {
+            if (
+              e &&
+              e.message &&
+              e.message.indexOf('fetch') !== -1 &&
+              e.message.indexOf('getter') !== -1
+            ) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              return true;
+            }
+          },
+          true
+        );
+
+        // 2. Patch prototype chain and window instance
+        try {
+          var win = typeof window !== 'undefined' ? window : globalThis;
+          if (!win) return;
+
+          var currentFetch = win.fetch;
+
+          function defineAccessor(target) {
+            if (!target) return false;
+            try {
+              var desc = Object.getOwnPropertyDescriptor(target, 'fetch');
+              if (desc && (desc.configurable || (desc.get && !desc.set))) {
+                Object.defineProperty(target, 'fetch', {
+                  get: function () {
+                    return currentFetch;
+                  },
+                  set: function (val) {
+                    currentFetch = val;
+                  },
+                  configurable: true,
+                  enumerable: desc.enumerable !== false,
+                });
+                return true;
+              }
+            } catch (err) {}
+            return false;
+          }
+
+          var p = win;
+          while (p) {
+            defineAccessor(p);
+            p = Object.getPrototypeOf(p);
+          }
+
+          if (typeof Window !== 'undefined' && Window.prototype) {
+            defineAccessor(Window.prototype);
+            var winProto = Object.getPrototypeOf(Window.prototype);
+            if (winProto) defineAccessor(winProto);
+          }
+
+          try {
+            Object.defineProperty(win, 'fetch', {
+              get: function () {
+                return currentFetch;
+              },
+              set: function (val) {
+                currentFetch = val;
+              },
+              configurable: true,
+              enumerable: true,
+            });
+          } catch (e) {}
+        } catch (e) {}
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>B2B Lead Ingestion &amp; Enrichment</title>
+    <meta name="description" content="Production-ready, modular B2B lead ingestion pipeline with multi-provider adapters, deduplication, enrichment, and export dashboard." />
+    <meta property="og:title" content="B2B Lead Ingestion &amp; Enrichment" />
+    <meta property="og:description" content="Production-ready, modular B2B lead ingestion pipeline with multi-provider adapters, deduplication, enrichment, and export dashboard." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

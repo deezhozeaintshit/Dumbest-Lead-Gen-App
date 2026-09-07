@@ -1,0 +1,80 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Lead {
+  id              String          @id @default(uuid())
+  business_name   String
+  legal_name      String?
+  domain          String?
+  website         String?
+  phone           String?
+  email           String?
+  industry        String?
+  employee_count  Int?
+  revenue_range   String?
+  street          String?
+  city            String?
+  state           String?
+  zip             String?
+  country         String?         @default("USA")
+  source_provider String
+  provider_id     String?
+  status          String          @default("NEW")
+  score           Int             @default(0)
+  email_status    String          @default("UNKNOWN") // VALID, INVALID, RISKY, UNKNOWN
+  created_at      DateTime        @default(now())
+  updated_at      DateTime        @updatedAt
+  contacts        ContactPerson[]
+
+  @@index([domain])
+  @@index([phone])
+  @@index([business_name, zip])
+  @@index([state])
+  @@index([industry])
+  @@index([status])
+  @@index([score])
+  @@index([email_status])
+}
+
+model ContactPerson {
+  id           String   @id @default(uuid())
+  lead_id      String
+  lead         Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  first_name   String
+  last_name    String
+  title        String?
+  email        String?
+  phone        String?
+  linkedin_url String?
+  created_at   DateTime @default(now())
+
+  @@index([lead_id])
+}
+
+model IngestionJob {
+  id             String   @id @default(uuid())
+  provider       String
+  query_params   String   // Stored as JSON stringified
+  total_found    Int      @default(0)
+  total_imported Int      @default(0)
+  status         String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  error_message  String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String
+  name       String?
+  role       String   @default("MEMBER") // ADMIN, MEMBER
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
