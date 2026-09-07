@@ -1,5 +1,6 @@
 import React from 'react';
 import { RefreshCw, Sparkles, Menu, Download } from 'lucide-react';
+import { PWAInstallButton } from './PWAInstallButton.js';
 
 interface HeaderProps {
   onRefresh: () => void;
@@ -86,6 +87,9 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{isExporting ? 'Exporting...' : 'Export CSV'}</span>
           </button>
         )}
+
+        {/* In-App Android & Mobile PWA Install Button */}
+        <PWAInstallButton />
 
         <button
           onClick={onRefresh}

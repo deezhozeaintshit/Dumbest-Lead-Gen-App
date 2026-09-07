@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, Lock, Mail, User as UserIcon, ArrowRight, KeyRound, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.js';
+import { PWAInstallButton } from './PWAInstallButton.js';
 
 export const AuthScreen: React.FC = () => {
   const { login, register, error, clearError } = useAuth();
@@ -61,6 +62,11 @@ export const AuthScreen: React.FC = () => {
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl"></div>
         <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl"></div>
+      </div>
+
+      {/* Top right mobile install action */}
+      <div className="absolute top-4 right-4 z-20">
+        <PWAInstallButton />
       </div>
 
       <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl p-6 sm:p-8 shadow-2xl space-y-6">

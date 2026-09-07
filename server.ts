@@ -778,6 +778,12 @@ async function startServer() {
     }
   });
 
+  // Serve PWA Web App Manifest with correct MIME type
+  app.get(['/manifest.webmanifest', '/manifest.json'], (_req, res) => {
+    res.setHeader('Content-Type', 'application/manifest+json');
+    res.sendFile(path.resolve(process.cwd(), 'public', 'manifest.webmanifest'));
+  });
+
   // Vite middleware for development vs static build in production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

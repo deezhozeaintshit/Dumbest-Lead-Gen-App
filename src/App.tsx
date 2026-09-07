@@ -8,6 +8,8 @@ import { StatsBanner } from './components/StatsBanner.js';
 import { IngestionControlPanel } from './components/IngestionControlPanel.js';
 import { LeadTable } from './components/LeadTable.js';
 import { LeadDetailModal } from './components/LeadDetailModal.js';
+import { PWAMobileBanner } from './components/PWAMobileBanner.js';
+import { OfflineIndicator } from './components/OfflineIndicator.js';
 import { IngestionJob, Lead, PipelineStats, ProviderInfo } from './types.js';
 
 function DashboardContent() {
@@ -387,6 +389,10 @@ function DashboardContent() {
 
       {/* Main View Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#09090B] h-full overflow-hidden">
+        {/* Offline & PWA Mobile Prompts */}
+        <OfflineIndicator />
+        <PWAMobileBanner />
+
         {/* Header */}
         <Header
           onRefresh={refreshAll}
