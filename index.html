@@ -4,22 +4,36 @@
     <script>
       // Immediate protection against third-party wallet extension collisions and fetch getter issues
       (function () {
-        var isTargetError = function (str) {
-          if (!str || typeof str !== 'string') return false;
+        var isTargetError = function (val) {
+          if (!val) return false;
+          var str = '';
+          if (typeof val === 'string') {
+            str = val;
+          } else if (typeof val === 'object') {
+            str = (val.message || '') + ' ' + (val.stack || '') + ' ' + (val.name || '');
+            try {
+              str += ' ' + JSON.stringify(val);
+            } catch (_) {}
+          } else {
+            str = String(val);
+          }
           return (
             str.indexOf('ethereum') !== -1 ||
             str.indexOf('Cannot redefine property') !== -1 ||
             (str.indexOf('fetch') !== -1 && str.indexOf('getter') !== -1) ||
-            str.indexOf('[vite] failed to connect to websocket') !== -1
+            str.indexOf('[vite]') !== -1 ||
+            str.indexOf('failed to connect to websocket') !== -1 ||
+            str.indexOf('websocket') !== -1
           );
         };
 
-        // 1. Intercept uncaught errors (such as external wallet extensions redefining window.ethereum)
+        // 1. Intercept uncaught errors
         var prevOnError = window.onerror;
         window.onerror = function (msg, source, lineno, colno, error) {
           if (
-            isTargetError(typeof msg === 'string' ? msg : '') ||
-            (error && isTargetError(error.message))
+            isTargetError(msg) ||
+            isTargetError(error) ||
+            isTargetError(source)
           ) {
             return true; // suppress error
           }
@@ -34,7 +48,8 @@
             if (
               e &&
               (isTargetError(e.message) ||
-                (e.error && isTargetError(e.error.message)))
+                isTargetError(e.filename) ||
+                isTargetError(e.error))
             ) {
               e.preventDefault();
               e.stopImmediatePropagation();
@@ -47,11 +62,7 @@
         window.addEventListener(
           'unhandledrejection',
           function (e) {
-            if (
-              e &&
-              e.reason &&
-              (isTargetError(e.reason.message) || isTargetError(String(e.reason)))
-            ) {
+            if (e && isTargetError(e.reason)) {
               e.preventDefault();
               e.stopImmediatePropagation();
             }
@@ -59,17 +70,23 @@
           true
         );
 
-        // 2. Filter benign console noise from wallet extensions or Vite websocket disconnects
+        // 2. Filter console noise from wallet extensions or Vite websocket notices
         try {
-          var origConsoleError = console.error;
-          console.error = function () {
-            var firstArg = arguments[0];
-            var str = typeof firstArg === 'string' ? firstArg : (firstArg && firstArg.message ? firstArg.message : '');
-            if (isTargetError(str)) {
-              return;
-            }
-            origConsoleError.apply(console, arguments);
-          };
+          var methods = ['error', 'warn', 'log', 'info', 'debug'];
+          for (var i = 0; i < methods.length; i++) {
+            (function (m) {
+              var orig = console[m];
+              if (!orig) return;
+              console[m] = function () {
+                for (var j = 0; j < arguments.length; j++) {
+                  if (isTargetError(arguments[j])) {
+                    return;
+                  }
+                }
+                orig.apply(console, arguments);
+              };
+            })(methods[i]);
+          }
         } catch (_) {}
 
         // 3. Prevent "Cannot redefine property: ethereum" thrown by conflicting Web3 wallet extensions

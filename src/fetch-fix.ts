@@ -48,6 +48,27 @@
       }
     } catch (_) {}
 
+    // Suppress [vite] and benign websocket noise in console
+    try {
+      const isTarget = (v: any) => {
+        if (!v) return false;
+        const str = typeof v === 'string' ? v : (v.message || String(v));
+        return str.includes('[vite]') || str.includes('ethereum') || str.includes('websocket');
+      };
+      const methods = ['error', 'warn', 'log', 'info', 'debug'] as const;
+      for (const m of methods) {
+        const orig = (console as any)[m];
+        if (typeof orig === 'function') {
+          (console as any)[m] = function (...args: any[]) {
+            for (const a of args) {
+              if (isTarget(a)) return;
+            }
+            orig.apply(console, args);
+          };
+        }
+      }
+    } catch (_) {}
+
     // 2. Fix window.fetch setter accessors
     let currentFetch = win.fetch;
 
